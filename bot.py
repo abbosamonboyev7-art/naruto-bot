@@ -7,10 +7,9 @@ from openai import OpenAI
 
 # ================= ENV =================
 TOKEN = os.getenv("TOKEN")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("AI_INTEGRATIONS_OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("AI_INTEGRATIONS_OPENAI_BASE_URL")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
 
-client = OpenAI(api_key=OPENAI_KEY, base_url=OPENAI_BASE_URL if OPENAI_BASE_URL else None)
+client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 
 DB = "naruto.db"
 
@@ -54,7 +53,7 @@ async def set_user(uid, score=None, last_q=None):
 # ================= AI =================
 def generate_question():
     res = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="llama3-8b-8192",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": "Naruto bo'yicha oson quiz savol ber (faqat savol)"}
@@ -64,7 +63,7 @@ def generate_question():
 
 def check_answer(q, a):
     res = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="llama3-8b-8192",
         messages=[
             {"role": "system", "content": "TRUE yoki FALSE qaytar"},
             {"role": "user", "content": f"Savol: {q}\nJavob: {a}"}
