@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import threading
 import aiosqlite
@@ -67,7 +68,6 @@ def run_web_server():
         await site.start()
         print(f"Web server {PORT} portda ishlamoqda...")
         await asyncio.sleep(float("inf"))
-
     asyncio.run(start_server())
 
 # ================= AI =================
@@ -76,45 +76,55 @@ def generate_question():
         model="llama3-8b-8192",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": "Naruto bo'yicha oson quiz savol ber (faqat savol)"}
+            {"role": "user", "content": """Naruto bo'yicha bitta test savol yarat.
+Quyidagi JSON formatda qaytargin (boshqa hech narsa yozma):
+{
+  "savol": "Savol matni",
+  "variantlar": ["1-variant", "2-variant", "3-variant", "4-variant"],
+  "togri": 0
+}
+"togri" — to'g'ri javobning indeksi (0 dan 3 gacha)."""}
         ]
     )
-    return res.choices[0].message.content
-
-def check_answer(q, a):
-    res = client.chat.completions.create(
-        model="llama3-8b-8192",
-        messages=[
-            {"role": "system", "content": "TRUE yoki FALSE qaytar"},
-            {"role": "user", "content": f"Savol: {q}\nJavob: {a}"}
-        ]
-    )
-    return "true" in res.choices[0].message.content.lower()
+    content = res.choices[0].message.content.strip()
+    # JSON ni ajratib olish
+    start = content.find("{")
+    end = content.rfind("}") + 1
+    data = json.loads(content[start:end])
+    return data
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍥 Konoha shinobi bot!\n\n"
-        "/quiz - boshlash\n/score - ball"
+        "/quiz - savol boshlash\n/score - ballingiz"
     )
 
 # ================= QUIZ =================
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
 
-    q = generate_question()
-    await set_user(uid, last_q=q)
+    await update.message.reply_text("⏳ Savol tayyorlanmoqda...")
+
+    try:
+        data = generate_question()
+    except Exception as e:
+        await update.message.reply_text("❌ Savol yaratishda xato. Qayta urinib ko'ring: /quiz")
+        return
+
+    await set_user(uid, last_q=json.dumps(data, ensure_ascii=False))
 
     keyboard = [
-        [InlineKeyboardButton("🅰 A", callback_data="A"),
-         InlineKeyboardButton("🅱 B", callback_data="B")],
-        [InlineKeyboardButton("🅲 C", callback_data="C"),
-         InlineKeyboardButton("🅳 D", callback_data="D")]
+        [InlineKeyboardButton(f"1️⃣ {data['variantlar'][0]}", callback_data="0")],
+        [InlineKeyboardButton(f"2️⃣ {data['variantlar'][1]}", callback_data="1")],
+        [InlineKeyboardButton(f"3️⃣ {data['variantlar'][2]}", callback_data="2")],
+        [InlineKeyboardButton(f"4️⃣ {data['variantlar'][3]}", callback_data="3")],
     ]
 
     await update.message.reply_text(
-        f"🍥 SAVOL:\n\n{q}",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"🍥 *SAVOL:*\n\n{data['savol']}",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
     )
 
 # ================= ANSWER =================
@@ -123,32 +133,43 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     uid = str(query.from_user.id)
-    ans = query.data
+    chosen = int(query.data)
 
-    score, last_q = await get_user(uid)
+    score, last_q_str = await get_user(uid)
 
-    if check_answer(last_q, ans):
+    if not last_q_str:
+        await query.edit_message_text("❌ Avval /quiz bilan savol oling!")
+        return
+
+    try:
+        data = json.loads(last_q_str)
+    except Exception:
+        await query.edit_message_text("❌ Xato yuz berdi. /quiz bilan qayta boshlang.")
+        return
+
+    correct = data["togri"]
+    correct_answer = data["variantlar"][correct]
+
+    if chosen == correct:
         score += 1
-        msg = "🔥 To'g'ri! +1 chakra"
+        await set_user(uid, score=score)
+        msg = f"✅ *To'g'ri!* +1 chakra 🔥\n\nJavob: *{correct_answer}*\n\n🏆 Score: {score}"
     else:
-        msg = "💥 Noto'g'ri!"
+        chosen_answer = data["variantlar"][chosen]
+        msg = f"❌ *Noto'g'ri!*\n\nSiz: {chosen_answer}\nTo'g'ri javob: *{correct_answer}*\n\n🏆 Score: {score}"
 
-    await set_user(uid, score=score)
-
-    await query.edit_message_text(f"{msg}\n🏆 Score: {score}")
+    await query.edit_message_text(msg, parse_mode="Markdown")
 
 # ================= SCORE =================
 async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     s, _ = await get_user(uid)
-
     await update.message.reply_text(f"🏆 Shinobi score: {s}")
 
 # ================= MAIN =================
 if __name__ == "__main__":
     asyncio.run(init_db())
 
-    # Web serverni alohida threadda ishga tushir
     web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
 
