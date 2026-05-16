@@ -1,6 +1,8 @@
 import os
+import asyncio
+import threading
 import aiosqlite
-import random
+from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from openai import OpenAI
@@ -8,6 +10,7 @@ from openai import OpenAI
 # ================= ENV =================
 TOKEN = os.getenv("TOKEN")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
+PORT = int(os.getenv("PORT", 8000))
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 
@@ -49,6 +52,23 @@ async def set_user(uid, score=None, last_q=None):
         if last_q is not None:
             await db.execute("UPDATE users SET last_q=? WHERE user_id=?", (last_q, uid))
         await db.commit()
+
+# ================= WEB SERVER (UptimeRobot uchun) =================
+async def handle_ping(request):
+    return web.Response(text="Bot ishlayapti! 🍥")
+
+def run_web_server():
+    async def start_server():
+        app = web.Application()
+        app.router.add_get("/", handle_ping)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", PORT)
+        await site.start()
+        print(f"Web server {PORT} portda ishlamoqda...")
+        await asyncio.sleep(float("inf"))
+
+    asyncio.run(start_server())
 
 # ================= AI =================
 def generate_question():
@@ -126,8 +146,11 @@ async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN =================
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(init_db())
+
+    # Web serverni alohida threadda ishga tushir
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
 
     app = ApplicationBuilder().token(TOKEN).build()
 
